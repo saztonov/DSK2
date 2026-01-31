@@ -35,11 +35,14 @@ class OCRService:
 
         self.model = AutoModel.from_pretrained(
             MODEL_NAME,
-            _attn_implementation='flash_attention_2',
+            attn_implementation='eager',  # Use eager instead of flash_attention_2
             trust_remote_code=True,
             use_safetensors=True
         )
-        self.model = self.model.eval().cuda().to(torch.bfloat16)
+        
+        # Use CUDA if available, otherwise CPU
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = self.model.eval().to(device).to(torch.bfloat16)
 
         self._is_ready = True
         logger.info("Model loaded successfully")

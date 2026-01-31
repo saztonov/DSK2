@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
-# Upgrade pip
-RUN python3 -m pip install --upgrade pip
+# Install pip for Python 3.12
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
 
 # Install PyTorch with CUDA 12.8
 RUN pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
@@ -32,9 +32,6 @@ RUN pip3 install torch torchvision --index-url https://download.pytorch.org/whl/
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install flash-attn
-RUN pip install flash-attn==2.7.3 --no-build-isolation
 
 # Copy application code
 COPY app/ ./app/
