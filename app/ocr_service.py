@@ -83,8 +83,19 @@ class OCRService:
             image = image.convert("RGB")
         return self.recognize(image, mode)
 
-    def process_pdf(self, pdf_bytes: bytes, mode: OCRMode = OCRMode.MARKDOWN) -> list[str]:
-        pages = convert_from_bytes(pdf_bytes, dpi=200)
+    def process_pdf(
+        self, 
+        pdf_bytes: bytes, 
+        mode: OCRMode = OCRMode.MARKDOWN,
+        first_page: Optional[int] = None,
+        last_page: Optional[int] = None
+    ) -> list[str]:
+        pages = convert_from_bytes(
+            pdf_bytes, 
+            dpi=200,
+            first_page=first_page,
+            last_page=last_page
+        )
         results = []
 
         for page in pages:

@@ -46,7 +46,10 @@ async def health():
 @app.post("/ocr", response_model=OCRResponse)
 async def ocr(
     file: UploadFile = File(..., description="Image or PDF file"),
-    mode: OCRMode = Form(default=OCRMode.MARKDOWN, description="OCR mode")
+    mode: OCRMode = Form(default=OCRMode.MARKDOWN, description="OCR mode"),
+    page: int = Form(default=None, description="Single page to process (1-based)"),
+    first_page: int = Form(default=None, description="First page to process (1-based)"),
+    last_page: int = Form(default=None, description="Last page to process (1-based)")
 ):
     content_type = file.content_type or ""
 
@@ -61,7 +64,17 @@ async def ocr(
         file_bytes = await file.read()
 
         if content_type == SUPPORTED_PDF_TYPE:
-            results = ocr_service.process_pdf(file_bytes, mode)
+            # If single page specified, use it for both first_page and last_page
+            if page is not None:
+                first_page = page
+                last_page = page
+            
+            results = ocr_service.process_pdf(
+                file_bytes, 
+                mode,
+                first_page=first_page,
+                last_page=last_page
+            )
             markdown = "\n\n---\n\n".join(results)
             pages = len(results)
         else:
