@@ -70,12 +70,46 @@ class OCRService:
                 base_size=BASE_SIZE,
                 image_size=IMAGE_SIZE,
                 crop_mode=True,
-                save_results=False
+                save_results=True
             )
+
+            # Log all files in output directory for debugging
+            all_files = list(Path(tmp_dir).rglob("*"))
+            logger.info(f"Files in output dir: {[str(f) for f in all_files]}")
+
+            # Try to read from saved result file if result is None or empty
+            if not result:
+                # Look for result.mmd file (MultiMarkdown format)
+                mmd_file = Path(tmp_dir) / "result.mmd"
+                if mmd_file.exists():
+                    content = mmd_file.read_text(encoding="utf-8")
+                    if content.strip():
+                        logger.info(f"Found result in: {mmd_file}")
+                        return content
+                
+                # Look for markdown files (.md and .mmd)
+                for md_file in Path(tmp_dir).rglob("*.mmd"):
+                    content = md_file.read_text(encoding="utf-8")
+                    if content.strip():
+                        logger.info(f"Found markdown in: {md_file}")
+                        return content
+                
+                for md_file in Path(tmp_dir).rglob("*.md"):
+                    content = md_file.read_text(encoding="utf-8")
+                    if content.strip():
+                        logger.info(f"Found markdown in: {md_file}")
+                        return content
+                
+                # Look for text files
+                for txt_file in Path(tmp_dir).rglob("*.txt"):
+                    content = txt_file.read_text(encoding="utf-8")
+                    if content.strip():
+                        logger.info(f"Found text in: {txt_file}")
+                        return content
 
             if isinstance(result, dict):
                 return result.get("text", str(result))
-            return str(result)
+            return str(result) if result else ""
 
     def recognize_bytes(self, image_bytes: bytes, mode: OCRMode = OCRMode.MARKDOWN) -> str:
         image = Image.open(io.BytesIO(image_bytes))
