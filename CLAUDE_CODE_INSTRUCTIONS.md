@@ -2,81 +2,82 @@
 
 ## Описание сервиса
 
-OCR-сервис на базе модели **DeepSeek-OCR-2** для распознавания текста и таблиц из изображений и PDF-документов. Сервис возвращает результат в формате Markdown.
+OCR API на базе модели DeepSeek-OCR-2 для распознавания текста и таблиц из изображений и PDF документов. Сервис развёрнут локально в Docker с GPU ускорением и доступен через публичный URL.
 
-## Базовый URL
+## Доступ к API
 
-```
-http://localhost:8001
-```
-
-> При локальном запуске через docker-compose порт `8001` маппится на внутренний `8000`.
-
----
+- **Публичный URL:** `https://youtu.pnode.site`
+- **Локальный URL:** `http://localhost:8001`
 
 ## Endpoints
 
-### 1. Health Check
+### GET /health
+Проверка состояния сервиса.
 
-Проверка состояния сервиса и загрузки модели.
-
-**Запрос:**
-```http
-GET /health
-```
-
-**Ответ (JSON):**
-```json
-{
-  "status": "ok",
-  "model_loaded": true
-}
-```
-
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `status` | `string` | `"ok"` - сервис готов, `"loading"` - модель загружается |
-| `model_loaded` | `boolean` | `true` если модель загружена и готова к работе |
-
-**Пример curl:**
 ```bash
-curl http://localhost:8001/health
+curl https://youtu.pnode.site/health
 ```
 
----
-
-### 2. OCR - Распознавание документа
-
-Основной endpoint для распознавания текста.
-
-**Запрос:**
-```http
-POST /ocr
-Content-Type: multipart/form-data
+**Ответ:**
+```json
+{"status": "ok", "model_loaded": true}
 ```
 
-**Параметры формы:**
+### POST /ocr
+Распознавание текста из изображения или PDF.
+
+**Параметры (multipart/form-data):**
 
 | Параметр | Тип | Обязательный | Описание |
 |----------|-----|--------------|----------|
-| `file` | `file` | ✅ Да | Изображение или PDF-файл |
-| `mode` | `string` | ❌ Нет | Режим OCR: `"markdown"` (по умолчанию) или `"ocr"` |
+| `file` | file | Да | Изображение или PDF файл |
+| `mode` | string | Нет | Режим: `markdown` (по умолчанию) или `text` |
+| `page` | int | Нет | Номер страницы PDF (1-based) |
+| `first_page` | int | Нет | Первая страница диапазона |
+| `last_page` | int | Нет | Последняя страница диапазона |
 
-**Поддерживаемые форматы файлов:**
-- Изображения: `image/png`, `image/jpeg`, `image/jpg`, `image/webp`, `image/bmp`, `image/tiff`
-- Документы: `application/pdf`
+**Поддерживаемые форматы:**
+- Изображения: PNG, JPEG, WebP, BMP, TIFF
+- Документы: PDF
 
-**Режимы OCR:**
+## Примеры использования
 
-| Режим | Описание |
-|-------|----------|
-| `markdown` | Конвертирует документ в структурированный Markdown с сохранением таблиц и форматирования |
-| `ocr` | Свободное распознавание текста без структурирования |
+### Распознать изображение
+```bash
+curl -X POST https://youtu.pnode.site/ocr \
+  -F "file=@screenshot.png" \
+  -F "mode=markdown"
+```
 
-**Успешный ответ (JSON):**
+### Распознать первую страницу PDF
+```bash
+curl -X POST https://youtu.pnode.site/ocr \
+  -F "file=@document.pdf" \
+  -F "mode=markdown" \
+  -F "page=1"
+```
+
+### Распознать диапазон страниц PDF (2-5)
+```bash
+curl -X POST https://youtu.pnode.site/ocr \
+  -F "file=@document.pdf" \
+  -F "mode=markdown" \
+  -F "first_page=2" \
+  -F "last_page=5"
+```
+
+### Распознать весь PDF (все страницы)
+```bash
+curl -X POST https://youtu.pnode.site/ocr \
+  -F "file=@document.pdf" \
+  -F "mode=markdown"
+```
+
+## Формат ответа
+
 ```json
 {
-  "markdown": "# Заголовок документа\n\nТекст документа...\n\n| Колонка 1 | Колонка 2 |\n|-----------|-----------|",
+  "markdown": "# Заголовок\n\nТекст документа...",
   "pages": 1,
   "success": true,
   "error": null
@@ -85,165 +86,90 @@ Content-Type: multipart/form-data
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `markdown` | `string` | Распознанный текст в формате Markdown |
-| `pages` | `integer` | Количество обработанных страниц |
-| `success` | `boolean` | `true` при успешной обработке |
-| `error` | `string \| null` | Сообщение об ошибке или `null` |
+| `markdown` | string | Распознанный текст в формате Markdown |
+| `pages` | int | Количество обработанных страниц |
+| `success` | bool | Успешность операции |
+| `error` | string/null | Сообщение об ошибке (если есть) |
 
-**Ответ при ошибке:**
-```json
-{
-  "detail": "Unsupported file type: application/octet-stream. Supported: image/png, image/jpeg, ..."
+## Примеры для PowerShell
+
+### Проверка здоровья
+```powershell
+(Invoke-WebRequest -Uri "https://youtu.pnode.site/health" -UseBasicParsing).Content
+```
+
+### OCR изображения
+```powershell
+$response = Invoke-RestMethod -Uri "https://youtu.pnode.site/ocr" -Method Post -Form @{
+    file = Get-Item "image.png"
+    mode = "markdown"
 }
+$response.markdown | Out-File "result.md" -Encoding UTF8
 ```
 
-HTTP коды:
-- `200` - Успех
-- `400` - Неподдерживаемый формат файла
-- `500` - Ошибка обработки
-
----
-
-## Примеры использования
-
-### curl - Распознавание изображения
-
-```bash
-curl -X POST "http://localhost:8001/ocr" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@document.png" \
-  -F "mode=markdown"
-```
-
-### curl - Распознавание PDF
-
-```bash
-curl -X POST "http://localhost:8001/ocr" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@document.pdf" \
-  -F "mode=markdown"
-```
-
-### Python - requests
+## Примеры для Python
 
 ```python
 import requests
 
-url = "http://localhost:8001/ocr"
+# Проверка здоровья
+response = requests.get("https://youtu.pnode.site/health")
+print(response.json())
 
-# Для изображения
-with open("document.png", "rb") as f:
+# OCR изображения
+with open("image.png", "rb") as f:
     response = requests.post(
-        url,
-        files={"file": ("document.png", f, "image/png")},
+        "https://youtu.pnode.site/ocr",
+        files={"file": f},
         data={"mode": "markdown"}
     )
-
 result = response.json()
 print(result["markdown"])
-print(f"Страниц: {result['pages']}")
+
+# OCR первой страницы PDF
+with open("document.pdf", "rb") as f:
+    response = requests.post(
+        "https://youtu.pnode.site/ocr",
+        files={"file": f},
+        data={"mode": "markdown", "page": "1"}
+    )
+result = response.json()
+print(result["markdown"])
 ```
 
-### Python - httpx (async)
+## Рекомендации
 
-```python
-import httpx
+1. **Для больших PDF** — используйте параметр `page` или `first_page`/`last_page` для обработки по частям
+2. **Таймауты** — обработка одной страницы занимает ~15-20 секунд, устанавливайте соответствующие таймауты
+3. **Размер файла** — максимальный размер запроса 30 MB (ограничение pnode)
+4. **Качество** — для лучшего распознавания используйте изображения с разрешением не менее 200 DPI
 
-async def ocr_document(file_path: str, mode: str = "markdown") -> dict:
-    async with httpx.AsyncClient() as client:
-        with open(file_path, "rb") as f:
-            response = await client.post(
-                "http://localhost:8001/ocr",
-                files={"file": f},
-                data={"mode": mode}
-            )
-        return response.json()
-```
+## Управление сервисом
 
-### JavaScript - fetch
-
-```javascript
-async function ocrDocument(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('mode', 'markdown');
-
-  const response = await fetch('http://localhost:8001/ocr', {
-    method: 'POST',
-    body: formData
-  });
-
-  return await response.json();
-}
-```
-
----
-
-## Особенности обработки PDF
-
-- Каждая страница PDF конвертируется в изображение с DPI=200
-- Результаты страниц объединяются через разделитель `\n\n---\n\n`
-- Поле `pages` содержит общее количество обработанных страниц
-
-**Пример ответа для многостраничного PDF:**
-```json
-{
-  "markdown": "# Страница 1\nТекст первой страницы...\n\n---\n\n# Страница 2\nТекст второй страницы...",
-  "pages": 2,
-  "success": true,
-  "error": null
-}
-```
-
----
-
-## Запуск сервиса
-
-### Docker Compose (рекомендуется)
-
+### Запуск Docker контейнера
 ```bash
+cd c:\Users\svarovsky\PycharmProjects\DSK2
 docker-compose up -d
 ```
 
-Требования:
-- Docker с поддержкой NVIDIA GPU
-- nvidia-container-toolkit
-
-### Проверка готовности
-
-После запуска модель загружается ~2-3 минуты. Проверяйте готовность через `/health`:
-
+### Остановка
 ```bash
-# Ждать пока model_loaded станет true
-while true; do
-  status=$(curl -s http://localhost:8001/health | jq -r '.model_loaded')
-  if [ "$status" = "true" ]; then
-    echo "Сервис готов!"
-    break
-  fi
-  echo "Загрузка модели..."
-  sleep 10
-done
+docker-compose down
 ```
 
----
+### Просмотр логов
+```bash
+docker-compose logs -f ocr-api
+```
 
-## Переменные окружения
+### Запуск pnode туннеля
+```bash
+start-pnode --token yJCjre7S7XOPibogOCtkPCPtfyKGTSBubiMVyJroX3ht0rZJAXPK2jimB6Xe --port 8001
+```
 
-| Переменная | По умолчанию | Описание |
-|------------|--------------|----------|
-| `MODEL_NAME` | `deepseek-ai/DeepSeek-OCR-2` | Имя модели на HuggingFace |
-| `BASE_SIZE` | `1024` | Базовый размер для обработки |
-| `IMAGE_SIZE` | `768` | Размер изображения |
-| `DEFAULT_MODE` | `markdown` | Режим OCR по умолчанию |
-| `HOST` | `0.0.0.0` | Хост для запуска |
-| `PORT` | `8000` | Порт сервиса |
+## Лимиты (бесплатный план pnode)
 
----
-
-## OpenAPI / Swagger
-
-Документация API доступна по адресам:
-- Swagger UI: `http://localhost:8001/docs`
-- ReDoc: `http://localhost:8001/redoc`
-- OpenAPI JSON: `http://localhost:8001/openapi.json`
+- 10 000 запросов в день
+- 10 GB трафика в день
+- Максимальный размер запроса: 30 MB
+- Скорость сети: 15 Мбит/с
