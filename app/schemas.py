@@ -18,3 +18,12 @@ class OCRResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
+
+
+class BatchOCRResponse(BaseModel):
+    """Ответ для batch OCR запроса"""
+    results: list[str]
+    success: bool = True
+    error: Optional[str] = None
+    processed: int = 0
+    failed: int = 0

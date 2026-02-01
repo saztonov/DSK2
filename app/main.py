@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 
-from app.schemas import OCRMode, OCRResponse, HealthResponse
+from app.schemas import OCRMode, OCRResponse, HealthResponse, BatchOCRResponse
 from app.ocr_service import ocr_service
 
 logging.basicConfig(
@@ -12,11 +12,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from typing import List
+
 SUPPORTED_IMAGE_TYPES = {
     "image/png", "image/jpeg", "image/jpg", "image/webp",
     "image/bmp", "image/tiff"
 }
 SUPPORTED_PDF_TYPE = "application/pdf"
+
+# Максимальный размер batch (защита от OOM)
+MAX_BATCH_SIZE = 16
 
 
 @asynccontextmanager
@@ -92,6 +97,77 @@ async def ocr(
         raise HTTPException(
             status_code=500,
             detail=f"OCR processing failed: {str(e)}"
+        )
+
+
+@app.post("/ocr/batch", response_model=BatchOCRResponse)
+async def ocr_batch(
+    files: List[UploadFile] = File(..., description="List of image files"),
+    mode: OCRMode = Form(default=OCRMode.MARKDOWN, description="OCR mode"),
+):
+    """
+    Batch OCR endpoint - обработка нескольких изображений за один запрос.
+
+    Уменьшает накладные расходы на HTTP, обрабатывая несколько изображений
+    в одном запросе. Изображения обрабатываются последовательно на GPU.
+
+    Args:
+        files: Список файлов изображений (PNG, JPEG, WebP, BMP, TIFF)
+        mode: Режим OCR - 'markdown' или 'ocr'
+
+    Returns:
+        BatchOCRResponse с результатами для каждого изображения
+    """
+    if len(files) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch size exceeds maximum: {len(files)} > {MAX_BATCH_SIZE}"
+        )
+
+    if len(files) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No files provided"
+        )
+
+    # Проверяем типы файлов
+    for i, file in enumerate(files):
+        content_type = file.content_type or ""
+        if content_type not in SUPPORTED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File {i + 1}: Unsupported type '{content_type}'. "
+                       f"Supported: {', '.join(SUPPORTED_IMAGE_TYPES)}"
+            )
+
+    try:
+        # Читаем все файлы
+        images_bytes = []
+        for file in files:
+            file_bytes = await file.read()
+            images_bytes.append(file_bytes)
+
+        logger.info(f"Batch OCR: получено {len(images_bytes)} изображений")
+
+        # Batch распознавание
+        results, processed, failed = ocr_service.recognize_batch_bytes(
+            images_bytes,
+            mode
+        )
+
+        return BatchOCRResponse(
+            results=results,
+            success=failed == 0,
+            processed=processed,
+            failed=failed,
+            error=f"{failed} images failed" if failed > 0 else None
+        )
+
+    except Exception as e:
+        logger.exception("Batch OCR processing failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Batch OCR processing failed: {str(e)}"
         )
 
 

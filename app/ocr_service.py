@@ -118,14 +118,14 @@ class OCRService:
         return self.recognize(image, mode)
 
     def process_pdf(
-        self, 
-        pdf_bytes: bytes, 
+        self,
+        pdf_bytes: bytes,
         mode: OCRMode = OCRMode.MARKDOWN,
         first_page: Optional[int] = None,
         last_page: Optional[int] = None
     ) -> list[str]:
         pages = convert_from_bytes(
-            pdf_bytes, 
+            pdf_bytes,
             dpi=200,
             first_page=first_page,
             last_page=last_page
@@ -139,6 +139,86 @@ class OCRService:
             results.append(result)
 
         return results
+
+    def recognize_batch(
+        self,
+        images: list[Image.Image],
+        mode: OCRMode = OCRMode.MARKDOWN
+    ) -> tuple[list[str], int, int]:
+        """
+        Batch распознавание нескольких изображений.
+
+        Обрабатывает изображения последовательно, но за один HTTP запрос,
+        что уменьшает накладные расходы на сеть.
+
+        Args:
+            images: Список PIL изображений
+            mode: Режим OCR (markdown или ocr)
+
+        Returns:
+            Tuple (results, processed_count, failed_count)
+        """
+        if not self._is_ready:
+            raise RuntimeError("Model not loaded")
+
+        results = []
+        processed = 0
+        failed = 0
+
+        for i, image in enumerate(images):
+            try:
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+
+                result = self.recognize(image, mode)
+                results.append(result)
+                processed += 1
+                logger.info(f"Batch: обработано изображение {i + 1}/{len(images)}")
+
+            except Exception as e:
+                logger.error(f"Batch: ошибка для изображения {i + 1}: {e}")
+                results.append("")  # Пустой результат для failed
+                failed += 1
+
+        logger.info(f"Batch завершён: {processed} успешно, {failed} ошибок")
+        return results, processed, failed
+
+    def recognize_batch_bytes(
+        self,
+        images_bytes: list[bytes],
+        mode: OCRMode = OCRMode.MARKDOWN
+    ) -> tuple[list[str], int, int]:
+        """Batch распознавание из bytes."""
+        images = []
+        for img_bytes in images_bytes:
+            try:
+                image = Image.open(io.BytesIO(img_bytes))
+                images.append(image)
+            except Exception as e:
+                logger.error(f"Ошибка открытия изображения: {e}")
+                images.append(None)
+
+        # Фильтруем None и запоминаем индексы
+        valid_images = [(i, img) for i, img in enumerate(images) if img is not None]
+
+        if not valid_images:
+            return [], 0, len(images_bytes)
+
+        # Распознаём только валидные
+        valid_results, processed, failed = self.recognize_batch(
+            [img for _, img in valid_images],
+            mode
+        )
+
+        # Восстанавливаем порядок с пустыми строками для invalid
+        results = [""] * len(images_bytes)
+        for (orig_idx, _), result in zip(valid_images, valid_results):
+            results[orig_idx] = result
+
+        # Добавляем failed от невалидных изображений
+        invalid_count = len(images_bytes) - len(valid_images)
+
+        return results, processed, failed + invalid_count
 
 
 ocr_service = OCRService()
