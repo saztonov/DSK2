@@ -1,10 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
 
+import torch
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 
-from app.schemas import OCRMode, OCRResponse, HealthResponse, BatchOCRResponse
-from app.ocr_service import ocr_service
+from app.schemas import OCRMode, OCRResponse, HealthResponse, BatchOCRResponse, GPUInfoResponse, GPUDevice
+from app.ocr_service import ocr_service, get_gpu_info
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,7 +45,35 @@ app = FastAPI(
 async def health():
     return HealthResponse(
         status="ok" if ocr_service.is_ready else "loading",
-        model_loaded=ocr_service.is_ready
+        model_loaded=ocr_service.is_ready,
+        device=ocr_service.device
+    )
+
+
+@app.get("/gpu", response_model=GPUInfoResponse)
+async def gpu_info():
+    """Get detailed GPU information and current device status."""
+    info = get_gpu_info()
+    
+    devices = [
+        GPUDevice(
+            index=d["index"],
+            name=d["name"],
+            compute_capability=d["compute_capability"],
+            total_memory_gb=d["total_memory_gb"],
+            multi_processor_count=d["multi_processor_count"]
+        )
+        for d in info.get("devices", [])
+    ]
+    
+    return GPUInfoResponse(
+        cuda_available=info["cuda_available"],
+        cuda_version=info.get("cuda_version"),
+        pytorch_version=torch.__version__,
+        device_count=info["device_count"],
+        devices=devices,
+        active_device=ocr_service.device,
+        model_device=ocr_service.device if ocr_service.is_ready else None
     )
 
 

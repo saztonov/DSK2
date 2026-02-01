@@ -9,10 +9,53 @@ from PIL import Image
 from transformers import AutoModel, AutoTokenizer
 from pdf2image import convert_from_bytes
 
-from app.config import MODEL_NAME, BASE_SIZE, IMAGE_SIZE
+from app.config import MODEL_NAME, BASE_SIZE, IMAGE_SIZE, DEVICE
 from app.schemas import OCRMode
 
 logger = logging.getLogger(__name__)
+
+
+def get_gpu_info() -> dict:
+    """Get detailed GPU information for logging."""
+    info = {
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_version": None,
+        "device_count": 0,
+        "devices": []
+    }
+    
+    if torch.cuda.is_available():
+        info["cuda_version"] = torch.version.cuda
+        info["device_count"] = torch.cuda.device_count()
+        
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            device_info = {
+                "index": i,
+                "name": props.name,
+                "compute_capability": f"{props.major}.{props.minor}",
+                "total_memory_gb": round(props.total_memory / (1024**3), 2),
+                "multi_processor_count": props.multi_processor_count
+            }
+            info["devices"].append(device_info)
+    
+    return info
+
+
+def select_device(config_device: str) -> str:
+    """Select the appropriate device based on configuration and availability."""
+    if config_device == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        else:
+            return "cpu"
+    elif config_device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            logger.warning(f"CUDA requested but not available, falling back to CPU")
+            return "cpu"
+        return config_device
+    else:
+        return config_device
 
 
 class OCRService:
@@ -20,13 +63,38 @@ class OCRService:
         self.model = None
         self.tokenizer = None
         self._is_ready = False
+        self._device = None
 
     @property
     def is_ready(self) -> bool:
         return self._is_ready
 
+    @property
+    def device(self) -> str:
+        return self._device
+
     def load_model(self) -> None:
         logger.info(f"Loading model: {MODEL_NAME}")
+        
+        # Log GPU information
+        gpu_info = get_gpu_info()
+        logger.info(f"CUDA available: {gpu_info['cuda_available']}")
+        if gpu_info['cuda_available']:
+            logger.info(f"CUDA version: {gpu_info['cuda_version']}")
+            logger.info(f"PyTorch version: {torch.__version__}")
+            logger.info(f"Number of GPUs: {gpu_info['device_count']}")
+            for dev in gpu_info['devices']:
+                logger.info(
+                    f"  GPU {dev['index']}: {dev['name']} "
+                    f"(Compute Capability: {dev['compute_capability']}, "
+                    f"Memory: {dev['total_memory_gb']} GB)"
+                )
+        else:
+            logger.warning("CUDA is NOT available - running on CPU will be slow!")
+
+        # Select device
+        self._device = select_device(DEVICE)
+        logger.info(f"Selected device: {self._device} (configured: {DEVICE})")
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
@@ -40,12 +108,15 @@ class OCRService:
             use_safetensors=True
         )
         
-        # Use CUDA if available, otherwise CPU
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model = self.model.eval().to(device).to(torch.bfloat16)
-
+        # Move model to selected device
+        self.model = self.model.eval().to(self._device).to(torch.bfloat16)
+        
+        # Verify model is on correct device
+        if hasattr(self.model, 'device'):
+            logger.info(f"Model loaded on device: {self.model.device}")
+        
         self._is_ready = True
-        logger.info("Model loaded successfully")
+        logger.info(f"Model loaded successfully on {self._device}")
 
     def _get_prompt(self, mode: OCRMode) -> str:
         if mode == OCRMode.MARKDOWN:

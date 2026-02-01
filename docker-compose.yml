@@ -14,6 +14,7 @@ services:
       - huggingface_cache:/root/.cache/huggingface
     environment:
       - CUDA_VISIBLE_DEVICES=0
+      - DEVICE=auto  # Options: auto, cuda, cuda:0, cuda:1, cpu
       - MODEL_NAME=deepseek-ai/DeepSeek-OCR-2
       - DEFAULT_MODE=markdown
     restart: unless-stopped
