@@ -32,6 +32,7 @@ logs/
 htmlcov/
 .tox/
 .nox/
+CLAUDE_CODE_INSTRUCTIONS.md
 
 # Build
 build/
