@@ -1,11 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import List
 
-import torch
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 
-from app.schemas import OCRMode, OCRResponse, HealthResponse, BatchOCRResponse, GPUInfoResponse, GPUDevice
-from app.ocr_service import ocr_service, get_gpu_info
+from app.schemas import OCRMode, OCRResponse, HealthResponse, BatchOCRResponse, GPUInfoResponse
+from app.ocr_service import ocr_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,7 +13,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from typing import List
 
 SUPPORTED_IMAGE_TYPES = {
     "image/png", "image/jpeg", "image/jpg", "image/webp",
@@ -21,7 +20,6 @@ SUPPORTED_IMAGE_TYPES = {
 }
 SUPPORTED_PDF_TYPE = "application/pdf"
 
-# Максимальный размер batch (защита от OOM)
 MAX_BATCH_SIZE = 16
 
 
@@ -34,9 +32,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="DeepSeek-OCR-2 API",
-    description="OCR API for text and table recognition using DeepSeek-OCR-2 model",
-    version="1.0.0",
+    title="DeepSeek-OCR-2 API (vLLM)",
+    description="OCR API for text and table recognition using DeepSeek-OCR-2 model via vLLM",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -52,28 +50,15 @@ async def health():
 
 @app.get("/gpu", response_model=GPUInfoResponse)
 async def gpu_info():
-    """Get detailed GPU information and current device status."""
-    info = get_gpu_info()
-    
-    devices = [
-        GPUDevice(
-            index=d["index"],
-            name=d["name"],
-            compute_capability=d["compute_capability"],
-            total_memory_gb=d["total_memory_gb"],
-            multi_processor_count=d["multi_processor_count"]
-        )
-        for d in info.get("devices", [])
-    ]
-    
+    """Get vLLM server status instead of local GPU info."""
     return GPUInfoResponse(
-        cuda_available=info["cuda_available"],
-        cuda_version=info.get("cuda_version"),
-        pytorch_version=torch.__version__,
-        device_count=info["device_count"],
-        devices=devices,
-        active_device=ocr_service.device,
-        model_device=ocr_service.device if ocr_service.is_ready else None
+        cuda_available=True,
+        cuda_version="vllm-managed",
+        pytorch_version="vllm-managed",
+        device_count=1,
+        devices=[],
+        active_device="vllm-server",
+        model_device="vllm-server" if ocr_service.is_ready else None
     )
 
 
@@ -98,13 +83,12 @@ async def ocr(
         file_bytes = await file.read()
 
         if content_type == SUPPORTED_PDF_TYPE:
-            # If single page specified, use it for both first_page and last_page
             if page is not None:
                 first_page = page
                 last_page = page
-            
+
             results = ocr_service.process_pdf(
-                file_bytes, 
+                file_bytes,
                 mode,
                 first_page=first_page,
                 last_page=last_page
@@ -135,17 +119,14 @@ async def ocr_batch(
     mode: OCRMode = Form(default=OCRMode.MARKDOWN, description="OCR mode"),
 ):
     """
-    Batch OCR endpoint - обработка нескольких изображений за один запрос.
-
-    Уменьшает накладные расходы на HTTP, обрабатывая несколько изображений
-    в одном запросе. Изображения обрабатываются последовательно на GPU.
+    Batch OCR endpoint - process multiple images in a single request.
 
     Args:
-        files: Список файлов изображений (PNG, JPEG, WebP, BMP, TIFF)
-        mode: Режим OCR - 'markdown' или 'ocr'
+        files: List of image files (PNG, JPEG, WebP, BMP, TIFF)
+        mode: OCR mode - 'markdown' or 'ocr'
 
     Returns:
-        BatchOCRResponse с результатами для каждого изображения
+        BatchOCRResponse with results for each image
     """
     if len(files) > MAX_BATCH_SIZE:
         raise HTTPException(
@@ -159,7 +140,6 @@ async def ocr_batch(
             detail="No files provided"
         )
 
-    # Проверяем типы файлов
     for i, file in enumerate(files):
         content_type = file.content_type or ""
         if content_type not in SUPPORTED_IMAGE_TYPES:
@@ -170,15 +150,13 @@ async def ocr_batch(
             )
 
     try:
-        # Читаем все файлы
         images_bytes = []
         for file in files:
             file_bytes = await file.read()
             images_bytes.append(file_bytes)
 
-        logger.info(f"Batch OCR: получено {len(images_bytes)} изображений")
+        logger.info(f"Batch OCR: received {len(images_bytes)} images")
 
-        # Batch распознавание
         results, processed, failed = ocr_service.recognize_batch_bytes(
             images_bytes,
             mode
